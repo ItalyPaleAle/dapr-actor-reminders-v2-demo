@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"log"
 	"strings"
 	"time"
@@ -24,11 +25,98 @@ type Reminders struct {
 }
 
 func NewReminders(db *sql.DB) *Reminders {
-	processor := NewProcessor(executeReminder, clock.New())
-	return &Reminders{
-		db:        db,
-		processor: processor,
+	r := &Reminders{
+		db: db,
 	}
+	r.processor = NewProcessor(r.executeReminder, clock.New())
+	return r
+}
+
+// AddReminder adds a reminder to be executed.
+func (r *Reminders) AddReminder(ctx context.Context, reminder *Reminder) error {
+	q := `INSERT OR REPLACE INTO reminders
+			(target, execution_time, period, ttl, data, lease_time)
+		VALUES (?, ?, ?, ?, ?, 0)`
+	_, err := r.db.ExecContext(ctx, q,
+		reminder.Key(),
+		reminder.ExecutionTime.UnixMilli(),
+		reminder.Period.Milliseconds(),
+		reminder.TTL.UnixMilli(),
+		reminder.Data,
+	)
+	return err
+}
+
+// DeleteReminder removes a reminder.
+func (r *Reminders) DeleteReminder(ctx context.Context, reminder *Reminder) error {
+	// Delete from the database
+	q := `DELETE FROM reminders WHERE target = ?`
+	res, err := r.db.ExecContext(ctx, q, reminder.Key())
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		log.Printf("Reminder %s was not deleted", reminder.Key())
+	}
+
+	// Remove the reminder from the processor in case it is in our queue
+	err = r.processor.Dequeue(reminder)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (r *Reminders) executeReminder(reminder *Reminder) {
+	err := r.doExecuteReminder(reminder)
+	if err != nil {
+		log.Printf("Error while attempting to execute reminder: %v", err)
+	}
+}
+
+func (r *Reminders) doExecuteReminder(reminder *Reminder) error {
+	// Delete the row from the database but only if it hasn't been modified yet
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	// Automatically rollback
+	defer tx.Rollback()
+
+	q := `DELETE FROM reminders
+		WHERE target = ?
+			AND lease_time = ?`
+	res, err := tx.ExecContext(context.TODO(), q, reminder.Key(), reminder.leaseTime)
+	if err != nil {
+		return fmt.Errorf("failed to execute query: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to count affected rows: %w", err)
+	}
+
+	// If no rows were affected, it means that the reminder was either deleted by another process, or we somehow lost the lease
+	// In either case, do not execute it
+	if n == 0 {
+		log.Printf("Reminder %s cannot be executed because we lost the lease or the reminder was deleted", reminder.Key())
+		return nil
+	}
+
+	// Execute the reminder
+	executeReminder(reminder)
+
+	// Now commit the transaction
+	err = tx.Commit()
+	if err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return nil
 }
 
 // PollReminders periodically polls the database for the next reminder.
@@ -57,9 +145,9 @@ func (r *Reminders) PollReminders(ctx context.Context) {
 			}
 
 			// Add the reminder to the queue
-			// TODO: Attempt to release the lease on the reminder
 			err = r.processor.Enqueue(reminder)
 			if err != nil {
+				// TODO: Attempt to release the lease on the reminder
 				log.Printf("Error enqueueing reminder: %v", err)
 				break
 			}
@@ -84,8 +172,8 @@ func (r *Reminders) getNextReminder(ctx context.Context) (*Reminder, error) {
 			ORDER BY execution_time ASC
 			LIMIT 1
 		)
-		RETURNING target, execution_time, period, ttl, data`
-	dbRes, err := r.db.QueryContext(ctx, q, now, now+5000, now+leaseDuration.Milliseconds())
+		RETURNING target, execution_time, period, ttl, lease_time`
+	dbRes, err := r.db.QueryContext(ctx, q, now, now+5000, now-leaseDuration.Milliseconds())
 	if err != nil {
 		// Ignore ErrNoRows
 		if errors.Is(err, sql.ErrNoRows) {
@@ -106,7 +194,7 @@ func (r *Reminders) getNextReminder(ctx context.Context) (*Reminder, error) {
 		target                     string
 		executionTime, period, ttl int64
 	)
-	err = dbRes.Scan(&target, &executionTime, &period, &ttl, &res.Data)
+	err = dbRes.Scan(&target, &executionTime, &period, &ttl, &res.leaseTime)
 	if err != nil {
 		return nil, err
 	}

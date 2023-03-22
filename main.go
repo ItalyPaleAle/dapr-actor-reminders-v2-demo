@@ -33,6 +33,9 @@ func main() {
 	// Poll for reminders
 	go reminders.PollReminders(context.Background())
 
+	// Start a server to get user input
+	go reminders.startServer()
+
 	// Sleep until context is canceled
 	sigCh := make(chan os.Signal)
 	signal.Notify(sigCh, os.Interrupt, os.Kill)
