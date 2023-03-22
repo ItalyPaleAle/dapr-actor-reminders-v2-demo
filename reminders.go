@@ -15,6 +15,8 @@ import (
 const (
 	// How often to poll for new rows
 	pollInterval = 2500 * time.Millisecond
+	// When fetching reminders, only look for those scheduled to be executed within this time interval
+	fetchAhead = 5 * time.Second
 	// Lease duration
 	leaseDuration = 30 * time.Second
 )
@@ -44,6 +46,13 @@ func (r *Reminders) AddReminder(ctx context.Context, reminder *Reminder) error {
 		reminder.TTL.UnixMilli(),
 		reminder.Data,
 	)
+
+	// Remove the reminder from the processor in case was an existing one that was replaced and it's currently in our queue
+	err = r.processor.Dequeue(reminder)
+	if err != nil {
+		return err
+	}
+
 	return err
 }
 
@@ -88,6 +97,7 @@ func (r *Reminders) doExecuteReminder(reminder *Reminder) error {
 	// Automatically rollback
 	defer tx.Rollback()
 
+	// TODO: If the reminder repeats, rather than deleting it, update its execution_time
 	q := `DELETE FROM reminders
 		WHERE target = ?
 			AND lease_time = ?`
@@ -173,7 +183,9 @@ func (r *Reminders) getNextReminder(ctx context.Context) (*Reminder, error) {
 			LIMIT 1
 		)
 		RETURNING target, execution_time, period, ttl, lease_time`
-	dbRes, err := r.db.QueryContext(ctx, q, now, now+5000, now-leaseDuration.Milliseconds())
+	dbRes, err := r.db.QueryContext(ctx, q,
+		now, now+fetchAhead.Milliseconds(), now-leaseDuration.Milliseconds(),
+	)
 	if err != nil {
 		// Ignore ErrNoRows
 		if errors.Is(err, sql.ErrNoRows) {
