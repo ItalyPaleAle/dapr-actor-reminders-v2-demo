@@ -6,7 +6,14 @@ Although this is implemented as a standalone app for demo purposes, it's intende
 
 # Running the demo
 
-After cloning the repo, you can start as many reminder processors as you'd like, each in its terminal window. Just make sure you configure the server to listen on a different port with the `PORT` env var.
+First, clone the repo:
+
+```sh
+git clone https://gist.github.com/38014830a5ed1586e8249b8204cea879.git reminders-demo
+cd reminders-demo
+```
+
+You can then start as many reminder processors as you'd like, each in its terminal window. Just make sure you configure the server to listen on a different port with the `PORT` env var.
 
 For example, to run 2 instances, use 2 terminal windows:
 
