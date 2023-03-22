@@ -33,7 +33,9 @@ This solution requires a relational database. This demo implements SQLite only, 
 
 However, this solution allows an "unlimited" number of processes (Dapr sidecars) to process reminders, in a conflict-free way. It's ok for processors to scale horizontally, also dynamically. There's a "natural" load balancing thanks to the fact that all processors are competing to fetch reminders from the database.
 
-This solution should allow for really high throughput in executng, scheduling, or re-scheduling (modifying or deleting) reminders. In itself, it's not impacted by the total number of actor types and/or actor IDs, and it can scale horizontally well when there are many reminders to be executed.
+This solution should allow for really high throughput in executing, scheduling, or re-scheduling (modifying or deleting) reminders. In itself, it's not impacted by the total number of actor types and/or actor IDs, and it can scale horizontally well when there are many reminders to be executed. The goal is that the limiting factor for performance and scalability should only be in the database, and not in Dapr itself.
+
+Unlike other proposals for "v2" of Actor Reminders in Dapr, this one doesn't involve creating a separate control plane service for storing and executing Actor Reminders.
 
 ## How it works
 
@@ -54,7 +56,14 @@ This solution should allow for really high throughput in executng, scheduling, o
 - When a new reminder is added, it's saved in the database. If it's scheduled to be executed "immediately", the first sidecar that is polling for reminders will pick it up.
 - When a reminder is updated (same actor type, actor ID, and reminder name), it's replaced in the database. This also removes any lease that may exist.
 
-# TODO
+# Notes for implementing in Dapr
 
-- [ ] For databases that support row-level locking (not SQLite), rather than obtaining leases that are stored in the rows, obtain exclusive locks on rows. This allows for quicker detection of expired locks.
-- [ ] For databases that support notifications (e.g. Postgres), use those to notify if a new record has been added that needs to be executed within `fetchAhead`.
+When implementing this in Dapr:
+
+- As mentioned, this proposal requires Dapr to have access to a relational database.
+  - We will add relevant methods to state store components that have the required capabilities (pretty much all the relational databases, and only those). These methods are going to be very specific for our use case.
+    - For example, components will implement a `WatchReminders` method that sends on a Go channel all reminders as they come in. The method is generic because each component will have a different implementation depending on the capabilities of the database. For example, whilst SQLite will do a periodic polling, for Postgres we could rely on PGNotify to be notified when new reminders are added that are within the `fetchAhead` interval instead, avoiding polling.
+    - Another example is how we acquire leases. For databases that support row-level locking (not SQLite), rather than obtaining leases that are stored in the rows, obtain exclusive locks on rows. This allows for quicker detection of expired locks too.
+    - Another example of a method that will be component-specific is `ExecuteReminders`. The component will manage the long-running transaction and the caller (daprd) will pass some callbacks that are invoked when the row is deleted (or updated for repeating reminders) and that method returns to confirm the execution. For databases like SQLite in which long-running transactions aren't an option (because transactions block the entire database), we will instead have a background loop that renews the lease while the reminder is being executed.
+- With this proposal, reminders are still executed by each sidecar, just like in the current "v1" (and unlike other "v2" proposals that involved creating a separate control plane service).  
+  Because of this, we may be able to continue offering users the option of using the "v1" implementation (with caveats around its performance and scalability) if they have the requirement of continuing to use state stores that are not relational databases (assuming we're comfortable with the cost of continuing to support the then-legacy solution).
