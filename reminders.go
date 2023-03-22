@@ -175,8 +175,8 @@ func (r *Reminders) getNextReminder(ctx context.Context) (*reminders.Reminder, e
 	// The row is atomically updated to acquire a lease
 	q := `UPDATE reminders
 		SET lease_time = ?
-		WHERE target IN (
-			SELECT target
+		WHERE ROWID IN (
+			SELECT ROWID
 			FROM reminders
 			WHERE 
 				execution_time < ?

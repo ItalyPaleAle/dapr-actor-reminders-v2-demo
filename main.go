@@ -77,7 +77,7 @@ func ensureTable(db *sql.DB) error {
 			ttl INTEGER,
 			data BLOB,
 			lease_time INTEGER NOT NULL
-		) WITHOUT ROWID;
+		);
 
 		CREATE INDEX IF NOT EXISTS execution_time_idx ON reminders (execution_time ASC);
 		CREATE INDEX IF NOT EXISTS lease_time_idx ON reminders (lease_time ASC);
