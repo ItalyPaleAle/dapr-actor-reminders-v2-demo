@@ -11,6 +11,8 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
+
+	"reminders-demo/pkg/reminders"
 )
 
 func main() {
@@ -44,7 +46,7 @@ func main() {
 }
 
 // Invoked when a reminder is executed.
-func executeReminder(r *Reminder) {
+func executeReminder(r *reminders.Reminder) {
 	log.Printf("Executed reminder %s - scheduled for %s", r.Key(), r.ExecutionTime.Local().Format(time.RFC822))
 }
 

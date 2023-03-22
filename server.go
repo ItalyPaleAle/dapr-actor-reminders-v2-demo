@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"reminders-demo/pkg/reminders"
 	"time"
 
 	"github.com/go-chi/chi"
@@ -75,7 +76,7 @@ func (rm *Reminders) startServer() {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		reminder := &Reminder{
+		reminder := &reminders.Reminder{
 			ActorType:     req.ActorType,
 			ActorID:       req.ActorID,
 			Name:          req.Name,
@@ -94,7 +95,7 @@ func (rm *Reminders) startServer() {
 	// DELETE /reminder - Deletes a reminder
 	router.Delete("/reminder", func(w http.ResponseWriter, r *http.Request) {
 		// Use Reminder to get actorType, actorID, name
-		reminder := &Reminder{}
+		reminder := &reminders.Reminder{}
 		err := json.NewDecoder(r.Body).Decode(reminder)
 		if err != nil {
 			w.Write([]byte("Error parsing request body: " + err.Error()))

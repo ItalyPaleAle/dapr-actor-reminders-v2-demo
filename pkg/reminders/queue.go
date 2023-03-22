@@ -1,4 +1,4 @@
-package main
+package reminders
 
 import (
 	"container/heap"

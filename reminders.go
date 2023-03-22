@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/benbjohnson/clock"
+
+	"reminders-demo/pkg/reminders"
 )
 
 const (
@@ -23,19 +25,19 @@ const (
 
 type Reminders struct {
 	db        *sql.DB
-	processor *Processor
+	processor *reminders.Processor
 }
 
 func NewReminders(db *sql.DB) *Reminders {
 	r := &Reminders{
 		db: db,
 	}
-	r.processor = NewProcessor(r.executeReminder, clock.New())
+	r.processor = reminders.NewProcessor(r.executeReminder, clock.New())
 	return r
 }
 
 // AddReminder adds a reminder to be executed.
-func (r *Reminders) AddReminder(ctx context.Context, reminder *Reminder) error {
+func (r *Reminders) AddReminder(ctx context.Context, reminder *reminders.Reminder) error {
 	q := `INSERT OR REPLACE INTO reminders
 			(target, execution_time, period, ttl, data, lease_time)
 		VALUES (?, ?, ?, ?, ?, 0)`
@@ -57,7 +59,7 @@ func (r *Reminders) AddReminder(ctx context.Context, reminder *Reminder) error {
 }
 
 // DeleteReminder removes a reminder.
-func (r *Reminders) DeleteReminder(ctx context.Context, reminder *Reminder) error {
+func (r *Reminders) DeleteReminder(ctx context.Context, reminder *reminders.Reminder) error {
 	// Delete from the database
 	q := `DELETE FROM reminders WHERE target = ?`
 	res, err := r.db.ExecContext(ctx, q, reminder.Key())
@@ -81,14 +83,14 @@ func (r *Reminders) DeleteReminder(ctx context.Context, reminder *Reminder) erro
 	return nil
 }
 
-func (r *Reminders) executeReminder(reminder *Reminder) {
+func (r *Reminders) executeReminder(reminder *reminders.Reminder) {
 	err := r.doExecuteReminder(reminder)
 	if err != nil {
 		log.Printf("Error while attempting to execute reminder: %v", err)
 	}
 }
 
-func (r *Reminders) doExecuteReminder(reminder *Reminder) error {
+func (r *Reminders) doExecuteReminder(reminder *reminders.Reminder) error {
 	// Delete the row from the database but only if it hasn't been modified yet
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -101,7 +103,7 @@ func (r *Reminders) doExecuteReminder(reminder *Reminder) error {
 	q := `DELETE FROM reminders
 		WHERE target = ?
 			AND lease_time = ?`
-	res, err := tx.ExecContext(context.TODO(), q, reminder.Key(), reminder.leaseTime)
+	res, err := tx.ExecContext(context.TODO(), q, reminder.Key(), reminder.LeaseTime)
 	if err != nil {
 		return fmt.Errorf("failed to execute query: %w", err)
 	}
@@ -166,7 +168,7 @@ func (r *Reminders) PollReminders(ctx context.Context) {
 	}
 }
 
-func (r *Reminders) getNextReminder(ctx context.Context) (*Reminder, error) {
+func (r *Reminders) getNextReminder(ctx context.Context) (*reminders.Reminder, error) {
 	now := time.Now().UnixMilli()
 
 	// Select the next reminder that is scheduled to be executed within 5s from now and that does not have an active lease
@@ -202,11 +204,11 @@ func (r *Reminders) getNextReminder(ctx context.Context) (*Reminder, error) {
 
 	// Scan the result
 	var (
-		res                        Reminder
+		res                        reminders.Reminder
 		target                     string
 		executionTime, period, ttl int64
 	)
-	err = dbRes.Scan(&target, &executionTime, &period, &ttl, &res.leaseTime)
+	err = dbRes.Scan(&target, &executionTime, &period, &ttl, &res.LeaseTime)
 	if err != nil {
 		return nil, err
 	}

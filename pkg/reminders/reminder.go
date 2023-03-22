@@ -1,4 +1,4 @@
-package main
+package reminders
 
 import (
 	"encoding/json"
@@ -15,7 +15,7 @@ type Reminder struct {
 	Data          json.RawMessage `json:"data,omitempty"`
 
 	// Lease time is used internally to make sure the reminder hasn't been modified while it's being executed
-	leaseTime int64
+	LeaseTime int64 `json:"-"`
 }
 
 // Key returns the key for this unique reminder.

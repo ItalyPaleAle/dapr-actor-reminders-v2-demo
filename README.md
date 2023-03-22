@@ -37,7 +37,7 @@ This solution should allow for really high throughput in executng, scheduling, o
 
 ## How it works
 
-- Each sidecar maintains in memory a queue (implemented as a priority queue) with the reminders that are scheduled to be executed in the immediate future. This queue is managed by the [Processor](./processor.go) that has one goroutine waiting until the time the reminder is to be executed.
+- Each sidecar maintains in memory a queue (implemented as a priority queue) with the reminders that are scheduled to be executed in the immediate future. This queue is managed by the [Processor](./pkg/reminders/processor.go) that has one goroutine waiting until the time the reminder is to be executed.
   - For details, see [dapr/dapr#6040](https://github.com/dapr/dapr/pull/6040)
 - Periodically every `pollInterval` (in the demo, every 2.5s), the sidecar polls the database to retrieve the next reminder that needs to be executed within the `fetchAhead` interval (in the demo, 5s).
   - At most 1 reminder is retrieved.
