@@ -21,6 +21,8 @@ const (
 	fetchAhead = 5 * time.Second
 	// Lease duration
 	leaseDuration = 30 * time.Second
+	// Maximum number of reminders fetched in batch in each iteration
+	batchSize = 2
 )
 
 type Reminders struct {
@@ -38,6 +40,8 @@ func NewReminders(db *sql.DB) *Reminders {
 
 // AddReminder adds a reminder to be executed.
 func (r *Reminders) AddReminder(ctx context.Context, reminder *reminders.Reminder) error {
+	// TODO (not for the demo): if the reminder's ExecutionTime is < fetchAhead, store with a lease right away and enqueue this reminder in the current process
+
 	q := `INSERT OR REPLACE INTO reminders
 			(target, execution_time, period, ttl, data, lease_time)
 		VALUES (?, ?, ?, ?, ?, 0)`
@@ -144,31 +148,30 @@ func (r *Reminders) PollReminders(ctx context.Context) {
 			return
 
 		case <-t.C:
-			// Get the reminder reminder
-			reminder, err := r.getNextReminder(ctx)
+			// Get the next reminers
+			next, err := r.getNextReminders(ctx)
 			if err != nil {
 				log.Printf("Error retrieving reminder: %v", err)
 				break
 			}
 
-			// No reminder, just continue
-			if reminder == nil {
-				break
+			// Enqueue all reminders
+			for _, reminder := range next {
+				// Add the reminder to the queue
+				err = r.processor.Enqueue(&reminder)
+				if err != nil {
+					// TODO: Attempt to release the lease on the reminder
+					log.Printf("Error enqueueing reminder: %v", err)
+					break
+				}
+				log.Printf("Enqueued reminder %s - scheduled for %s", reminder.Key(), reminder.ExecutionTime.Local().Format(time.RFC822))
 			}
 
-			// Add the reminder to the queue
-			err = r.processor.Enqueue(reminder)
-			if err != nil {
-				// TODO: Attempt to release the lease on the reminder
-				log.Printf("Error enqueueing reminder: %v", err)
-				break
-			}
-			log.Printf("Enqueued reminder %s - scheduled for %s", reminder.Key(), reminder.ExecutionTime.Local().Format(time.RFC822))
 		}
 	}
 }
 
-func (r *Reminders) getNextReminder(ctx context.Context) (*reminders.Reminder, error) {
+func (r *Reminders) getNextReminders(ctx context.Context) ([]reminders.Reminder, error) {
 	now := time.Now().UnixMilli()
 
 	// Select the next reminder that is scheduled to be executed within 5s from now and that does not have an active lease
@@ -182,11 +185,12 @@ func (r *Reminders) getNextReminder(ctx context.Context) (*reminders.Reminder, e
 				execution_time < ?
 				AND lease_time < ?
 			ORDER BY execution_time ASC
-			LIMIT 1
+			LIMIT ?
 		)
 		RETURNING target, execution_time, period, ttl, lease_time`
 	dbRes, err := r.db.QueryContext(ctx, q,
 		now, now+fetchAhead.Milliseconds(), now-leaseDuration.Milliseconds(),
+		batchSize,
 	)
 	if err != nil {
 		// Ignore ErrNoRows
@@ -197,28 +201,32 @@ func (r *Reminders) getNextReminder(ctx context.Context) (*reminders.Reminder, e
 	}
 	defer dbRes.Close()
 
-	// If the result is empty, return
-	if !dbRes.Next() {
-		return nil, nil
-	}
-
-	// Scan the result
+	// Scan each row in the result
+	res := make([]reminders.Reminder, batchSize)
 	var (
-		res                        reminders.Reminder
-		target                     string
-		executionTime, period, ttl int64
+		rmd           reminders.Reminder
+		i             int
+		target        string
+		executionTime int64
+		period, ttl   int64
 	)
-	err = dbRes.Scan(&target, &executionTime, &period, &ttl, &res.LeaseTime)
-	if err != nil {
-		return nil, err
-	}
-	parts := strings.Split(target, "/")
-	res.ActorType = parts[0]
-	res.ActorID = parts[1]
-	res.Name = parts[2]
-	res.ExecutionTime = time.Unix(executionTime/1000, (executionTime%1000)*10e6)
-	res.Period = time.Duration(period) * time.Millisecond
-	res.TTL = time.Unix(ttl/1000, (ttl%1000)*10e6)
+	for dbRes.Next() {
+		// Scan the row
+		err = dbRes.Scan(&target, &executionTime, &period, &ttl, &rmd.LeaseTime)
+		if err != nil {
+			return nil, err
+		}
+		parts := strings.Split(target, "/")
+		rmd.ActorType = parts[0]
+		rmd.ActorID = parts[1]
+		rmd.Name = parts[2]
+		rmd.ExecutionTime = time.Unix(executionTime/1000, (executionTime%1000)*10e6)
+		rmd.Period = time.Duration(period) * time.Millisecond
+		rmd.TTL = time.Unix(ttl/1000, (ttl%1000)*10e6)
 
-	return &res, nil
+		res[i] = rmd
+
+		i++
+	}
+	return res[:i], nil
 }

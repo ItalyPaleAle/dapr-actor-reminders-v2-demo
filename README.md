@@ -25,7 +25,7 @@ PORT=3000 go run .
 PORT=3001 go run .
 ```
 
-You can then create reminders by making requests to `POST /reminder`. Take a look at [`test.sh`](./test.sh) for an example that demonstrates how the solution works.
+You can then create reminders by making requests to `POST /reminder`. Take a look at [`test.sh`](./test.sh) for an example that demonstrates how the solution works (assumes apps listening on ports 3000 and 3001).
 
 # Design
 
@@ -41,12 +41,12 @@ Unlike other proposals for "v2" of Actor Reminders in Dapr, this one doesn't inv
 
 - Each sidecar maintains in memory a queue (implemented as a priority queue) with the reminders that are scheduled to be executed in the immediate future. This queue is managed by the [Processor](./pkg/reminders/processor.go) that has one goroutine waiting until the time the reminder is to be executed.
   - For details, see [dapr/dapr#6040](https://github.com/dapr/dapr/pull/6040)
-- Periodically every `pollInterval` (in the demo, every 2.5s), the sidecar polls the database to retrieve the next reminder that needs to be executed within the `fetchAhead` interval (in the demo, 5s).
-  - At most 1 reminder is retrieved.
-    - The query that retrieves the reminder also _atomically_ updates the row storing the current time as `lease_time`. This is used as a "lease token".
+- Periodically every `pollInterval` (in the demo, every 2.5s), the sidecar polls the database to retrieve the next reminders that needs to be executed within the `fetchAhead` interval (in the demo, 5s).
+  - At most `batchSize` (in the demo, 2) reminders are retrieved, and they are all scheduled to be executed within `fetchAhead`.
+    - The query that retrieves the reminders also _atomically_ updates the rows storing the current time as `lease_time`. This is used as a "lease token".
     - Rows that have a `lease_time` that is newer than the current time less `leaseDuration` (in the demo, 30s - this must be much bigger than `fetchAhead`) are skipped. This allows making sure that only one sidecar will retrieve a reminder, and if that sidecar is terminated before the reminder is executed, after `leaseDuration` it can be picked up by another sidecar.
     - Right now, the demo code doesn't do any filtering, but it's possible to make this filter only for reminders for actor types that are hosted by the sidecar, and possibly even for the actor IDs that are active.
-  - The reminder that is retrieved is added to the in-memory queue to be executed.
+  - The reminders that are retrieved are added to the in-memory queue to be executed at the time they're scheduled for.
 - When it's time to execute the reminder:
   1. First, the sidecar starts a transaction in the database which is rolled back automatically if the reminder fails to be executed (which means the reminder's lease will eventually expire and another sidecar will grab it).
   2. The sidecar deletes the reminder from the database (within the transaction).
@@ -54,6 +54,9 @@ Unlike other proposals for "v2" of Actor Reminders in Dapr, this one doesn't inv
   3. The reminder is executed.
   4. The transaction is committed if everything went well, which actually deletes the reminder from the database.
 - When a new reminder is added, it's saved in the database. If it's scheduled to be executed "immediately", the first sidecar that is polling for reminders will pick it up.
+  - If the reminder's scheduled time is within `fetchAhead` from now (in the demo, 5s), then it's stored in the database in a way that is already owned by the current sidecar (e.g. with `lease_time` already set). It's then directly enqueued in the queue managed by the current sidecar.
+  - This behavior can potentially lead to a less uniform distribution of reminders, so users should have a way to disable it.
+  - _Note: this is **not** implemented in this demo for the reason above_
 - When a reminder is updated (same actor type, actor ID, and reminder name), it's replaced in the database. This also removes any lease that may exist.
 
 # Notes for implementing in Dapr
