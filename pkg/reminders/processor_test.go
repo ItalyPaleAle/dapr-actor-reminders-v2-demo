@@ -1,19 +1,22 @@
 package reminders
 
 import (
+	"math/rand"
 	"runtime"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
-	clocklib "github.com/benbjohnson/clock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	clocktesting "k8s.io/utils/clock/testing"
 )
 
 func TestProcessor(t *testing.T) {
 	// Create the processor
-	clock := clocklib.NewMock()
+	clock := clocktesting.NewFakeClock(time.Now())
 	executeCh := make(chan *Reminder)
 	processor := NewProcessor(func(r *Reminder) {
 		executeCh <- r
@@ -50,12 +53,12 @@ func TestProcessor(t *testing.T) {
 	// Makes tickers advance
 	// Note that step must be > 500ms
 	advanceTickers := func(step time.Duration, count int) {
-		clock.Add(50 * time.Millisecond)
+		clock.Step(50 * time.Millisecond)
 		// Sleep on the wall clock for a few ms to allow the background goroutine to get in sync (especially when testing with -race)
 		runtime.Gosched()
 		time.Sleep(50 * time.Millisecond)
 		for i := 0; i < count; i++ {
-			clock.Add(step)
+			clock.Step(step)
 			// Sleep on the wall clock for a few ms to allow the background goroutine to get in sync (especially when testing with -race)
 			runtime.Gosched()
 			time.Sleep(50 * time.Millisecond)
@@ -272,6 +275,61 @@ func TestProcessor(t *testing.T) {
 		}
 	})
 
+	t.Run("enqueue multiple reminders concurrently that to be executed randomly", func(t *testing.T) {
+		const (
+			count    = 150
+			maxDelay = 30
+		)
+		now := clock.Now()
+		wg := sync.WaitGroup{}
+		for i := 0; i < count; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				execTime := now.Add(time.Second * time.Duration(rand.Intn(maxDelay))) //nolint:gosec
+				err := processor.Enqueue(newTestReminder(i, execTime))
+				require.NoError(t, err)
+			}(i)
+		}
+		wg.Wait()
+
+		// Collect
+		collected := make([]bool, count)
+		var collectedCount int64
+		doneCh := make(chan struct{})
+		go func() {
+			for {
+				select {
+				case <-doneCh:
+					return
+				case r := <-executeCh:
+					n, err := strconv.Atoi(r.Name)
+					if err == nil {
+						collected[n] = true
+						atomic.AddInt64(&collectedCount, 1)
+					}
+				}
+			}
+		}()
+
+		// Advance tickers and assert messages are coming in order
+		for i := 0; i <= maxDelay; i++ {
+			advanceTickers(time.Second, 1)
+			time.Sleep(50 * time.Millisecond)
+		}
+
+		// Allow for synchronization
+		assert.Eventually(t, func() bool {
+			return atomic.LoadInt64(&collectedCount) == count
+		}, 5*time.Second, 50*time.Millisecond)
+		close(doneCh)
+
+		// Ensure all items are true
+		for i := 0; i < count; i++ {
+			assert.Truef(t, collected[i], "item %d not received", i)
+		}
+	})
+
 	t.Run("stop processor", func(t *testing.T) {
 		// Enqueue 5 reminders
 		for i := 1; i <= 5; i++ {
@@ -285,7 +343,7 @@ func TestProcessor(t *testing.T) {
 		advanceTickers(0, 0)
 
 		// Stop the processor
-		processor.Stop()
+		require.NoError(t, processor.Close())
 
 		// Queue should not be processed
 		advanceTickers(time.Second, 2)
@@ -298,6 +356,6 @@ func TestProcessor(t *testing.T) {
 		require.ErrorIs(t, err, ErrProcessorStopped)
 
 		// Stopping again is a nop (should not crash)
-		processor.Stop()
+		require.NoError(t, processor.Close())
 	})
 }

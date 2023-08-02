@@ -10,7 +10,7 @@ import (
 )
 
 func TestQueue(t *testing.T) {
-	queue := NewQueue()
+	queue := NewQueue[*Reminder]()
 
 	// Add 5 reminders, which are not in order
 	queue.Insert(newTestReminder(2, "2022-02-02T02:02:02Z"), false)
@@ -24,12 +24,13 @@ func TestQueue(t *testing.T) {
 	i := 0
 	for {
 		// Pop an element from the queue
-		r := queue.Pop()
+		r, ok := queue.Pop()
 
 		if i < 5 {
+			require.True(t, ok)
 			require.NotNil(t, r)
 		} else {
-			require.Nil(t, r)
+			require.False(t, ok)
 			break
 		}
 		i++
@@ -42,7 +43,7 @@ func TestQueue(t *testing.T) {
 }
 
 func TestQueueSkipDuplicates(t *testing.T) {
-	queue := NewQueue()
+	queue := NewQueue[*Reminder]()
 
 	// Add 2 reminders
 	queue.Insert(newTestReminder(2, "2022-02-02T02:02:02Z"), false)
@@ -56,15 +57,15 @@ func TestQueueSkipDuplicates(t *testing.T) {
 	require.Equal(t, 2, queue.Len())
 
 	// Pop the items and check only the 2 original ones were in the queue
-	popAndCompare(t, &queue, 1, "2021-01-01T01:01:01Z")
-	popAndCompare(t, &queue, 2, "2022-02-02T02:02:02Z")
+	popAndCompare(t, queue, 1, "2021-01-01T01:01:01Z")
+	popAndCompare(t, queue, 2, "2022-02-02T02:02:02Z")
 
-	r := queue.Pop()
-	require.Nil(t, r)
+	_, ok := queue.Pop()
+	require.False(t, ok)
 }
 
 func TestQueueReplaceDuplicates(t *testing.T) {
-	queue := NewQueue()
+	queue := NewQueue[*Reminder]()
 
 	// Add 2 reminders
 	queue.Insert(newTestReminder(2, "2022-02-02T02:02:02Z"), false)
@@ -78,15 +79,15 @@ func TestQueueReplaceDuplicates(t *testing.T) {
 	require.Equal(t, 2, queue.Len())
 
 	// Pop the items and validate the new order
-	popAndCompare(t, &queue, 2, "2022-02-02T02:02:02Z")
-	popAndCompare(t, &queue, 1, "2029-09-09T09:09:09Z")
+	popAndCompare(t, queue, 2, "2022-02-02T02:02:02Z")
+	popAndCompare(t, queue, 1, "2029-09-09T09:09:09Z")
 
-	r := queue.Pop()
-	require.Nil(t, r)
+	_, ok := queue.Pop()
+	require.False(t, ok)
 }
 
 func TestAddToQueue(t *testing.T) {
-	queue := NewQueue()
+	queue := NewQueue[*Reminder]()
 
 	// Add 5 reminders, which are not in order
 	queue.Insert(newTestReminder(2, "2022-02-02T02:02:02Z"), false)
@@ -99,7 +100,8 @@ func TestAddToQueue(t *testing.T) {
 
 	// Pop 2 elements from the queue
 	for i := 1; i <= 2; i++ {
-		r := queue.Pop()
+		r, ok := queue.Pop()
+		require.True(t, ok)
 		require.NotNil(t, r)
 
 		ri, err := strconv.Atoi(r.Name)
@@ -120,7 +122,8 @@ func TestAddToQueue(t *testing.T) {
 
 	// Pop all the remaining elements and make sure they're in order
 	for i := 3; i <= 9; i++ {
-		r := queue.Pop()
+		r, ok := queue.Pop()
+		require.True(t, ok)
 		require.NotNil(t, r)
 
 		ri, err := strconv.Atoi(r.Name)
@@ -129,13 +132,13 @@ func TestAddToQueue(t *testing.T) {
 	}
 
 	// Queue should be empty now
-	r := queue.Pop()
-	require.Nil(t, r)
+	_, ok := queue.Pop()
+	require.False(t, ok)
 	require.Equal(t, 0, queue.Len())
 }
 
 func TestRemoveFromQueue(t *testing.T) {
-	queue := NewQueue()
+	queue := NewQueue[*Reminder]()
 
 	// Add 5 reminders, which are not in order
 	queue.Insert(newTestReminder(2, "2022-02-02T02:02:02Z"), false)
@@ -148,7 +151,8 @@ func TestRemoveFromQueue(t *testing.T) {
 
 	// Pop 2 elements from the queue
 	for i := 1; i <= 2; i++ {
-		r := queue.Pop()
+		r, ok := queue.Pop()
+		require.True(t, ok)
 		require.NotNil(t, r)
 
 		ri, err := strconv.Atoi(r.Name)
@@ -167,15 +171,15 @@ func TestRemoveFromQueue(t *testing.T) {
 	require.Equal(t, 2, queue.Len())
 
 	// Pop all the remaining elements and make sure they're in order
-	popAndCompare(t, &queue, 3, "2023-03-03T03:03:03Z")
-	popAndCompare(t, &queue, 5, "2029-09-09T09:09:09Z")
+	popAndCompare(t, queue, 3, "2023-03-03T03:03:03Z")
+	popAndCompare(t, queue, 5, "2029-09-09T09:09:09Z")
 
-	r := queue.Pop()
-	require.Nil(t, r)
+	_, ok := queue.Pop()
+	require.False(t, ok)
 }
 
 func TestUpdateInQueue(t *testing.T) {
-	queue := NewQueue()
+	queue := NewQueue[*Reminder]()
 
 	// Add 5 reminders, which are not in order
 	queue.Insert(newTestReminder(2, "2022-02-02T02:02:02Z"), false)
@@ -188,7 +192,8 @@ func TestUpdateInQueue(t *testing.T) {
 
 	// Pop 2 elements from the queue
 	for i := 1; i <= 2; i++ {
-		r := queue.Pop()
+		r, ok := queue.Pop()
+		require.True(t, ok)
 		require.NotNil(t, r)
 
 		ri, err := strconv.Atoi(r.Name)
@@ -210,51 +215,57 @@ func TestUpdateInQueue(t *testing.T) {
 	require.Equal(t, 3, queue.Len())
 
 	// Pop all the remaining elements and make sure they're in order
-	popAndCompare(t, &queue, 5, "2021-01-01T01:01:01Z") // 5 comes before 3 now
-	popAndCompare(t, &queue, 3, "2023-03-03T03:03:03Z")
-	popAndCompare(t, &queue, 4, "2024-04-04T14:14:14Z")
+	popAndCompare(t, queue, 5, "2021-01-01T01:01:01Z") // 5 comes before 3 now
+	popAndCompare(t, queue, 3, "2023-03-03T03:03:03Z")
+	popAndCompare(t, queue, 4, "2024-04-04T14:14:14Z")
 
-	r := queue.Pop()
-	require.Nil(t, r)
+	_, ok := queue.Pop()
+	require.False(t, ok)
 }
 
 func TestQueuePeek(t *testing.T) {
-	queue := NewQueue()
+	queue := NewQueue[*Reminder]()
 
-	// Peeking an empty queue returns nil
-	r := queue.Peek()
-	require.Nil(t, r)
+	// Peeking an empty queue returns false
+	_, ok := queue.Peek()
+	require.False(t, ok)
 
 	// Add 6 reminders, which are not in order
 	queue.Insert(newTestReminder(2, "2022-02-02T02:02:02Z"), false)
-	peekAndCompare(t, &queue, 2, "2022-02-02T02:02:02Z")
+	require.Equal(t, 1, queue.Len())
+	peekAndCompare(t, queue, 2, "2022-02-02T02:02:02Z")
 
 	queue.Insert(newTestReminder(3, "2023-03-03T03:03:03Z"), false)
-	peekAndCompare(t, &queue, 2, "2022-02-02T02:02:02Z")
+	require.Equal(t, 2, queue.Len())
+	peekAndCompare(t, queue, 2, "2022-02-02T02:02:02Z")
 
 	queue.Insert(newTestReminder(1, "2021-01-01T01:01:01Z"), false)
-	peekAndCompare(t, &queue, 1, "2021-01-01T01:01:01Z")
+	require.Equal(t, 3, queue.Len())
+	peekAndCompare(t, queue, 1, "2021-01-01T01:01:01Z")
 
 	queue.Insert(newTestReminder(5, "2029-09-09T09:09:09Z"), false)
-	peekAndCompare(t, &queue, 1, "2021-01-01T01:01:01Z")
+	require.Equal(t, 4, queue.Len())
+	peekAndCompare(t, queue, 1, "2021-01-01T01:01:01Z")
 
 	queue.Insert(newTestReminder(4, "2024-04-04T04:04:04Z"), false)
-	peekAndCompare(t, &queue, 1, "2021-01-01T01:01:01Z")
+	require.Equal(t, 5, queue.Len())
+	peekAndCompare(t, queue, 1, "2021-01-01T01:01:01Z")
 
 	queue.Insert(newTestReminder(6, "2019-01-19T01:01:01Z"), false)
-	peekAndCompare(t, &queue, 6, "2019-01-19T01:01:01Z")
+	require.Equal(t, 6, queue.Len())
+	peekAndCompare(t, queue, 6, "2019-01-19T01:01:01Z")
 
 	// Pop from the queue
-	popAndCompare(t, &queue, 6, "2019-01-19T01:01:01Z")
-	peekAndCompare(t, &queue, 1, "2021-01-01T01:01:01Z")
+	popAndCompare(t, queue, 6, "2019-01-19T01:01:01Z")
+	peekAndCompare(t, queue, 1, "2021-01-01T01:01:01Z")
 
 	// Update a reminder to bring it to first
 	queue.Update(newTestReminder(2, "2019-01-19T01:01:01Z"))
-	peekAndCompare(t, &queue, 2, "2019-01-19T01:01:01Z")
+	peekAndCompare(t, queue, 2, "2019-01-19T01:01:01Z")
 
 	// Replace the first reminder to push it back
 	queue.Insert(newTestReminder(2, "2039-01-19T01:01:01Z"), true)
-	peekAndCompare(t, &queue, 1, "2021-01-01T01:01:01Z")
+	peekAndCompare(t, queue, 1, "2021-01-01T01:01:01Z")
 }
 
 func newTestReminder(n int, dueTime any) *Reminder {
@@ -276,20 +287,18 @@ func newTestReminder(n int, dueTime any) *Reminder {
 	return r
 }
 
-func popAndCompare(t *testing.T, queue *Queue, expectN int, expectDueTime string) {
-	t.Helper()
-
-	r := queue.Pop()
+func popAndCompare(t *testing.T, queue *Queue[*Reminder], expectN int, expectDueTime string) {
+	r, ok := queue.Pop()
+	require.True(t, ok)
 	require.NotNil(t, r)
-	assert.Equal(t, r.Name, strconv.Itoa(expectN))
-	assert.Equal(t, r.ExecutionTime.Format(time.RFC3339), expectDueTime)
+	assert.Equal(t, strconv.Itoa(expectN), r.Name)
+	assert.Equal(t, expectDueTime, r.ScheduledTime().Format(time.RFC3339))
 }
 
-func peekAndCompare(t *testing.T, queue *Queue, expectN int, expectDueTime string) {
-	t.Helper()
-
-	r := queue.Peek()
+func peekAndCompare(t *testing.T, queue *Queue[*Reminder], expectN int, expectDueTime string) {
+	r, ok := queue.Peek()
+	require.True(t, ok)
 	require.NotNil(t, r)
-	assert.Equal(t, r.Name, strconv.Itoa(expectN))
-	assert.Equal(t, r.ExecutionTime.Format(time.RFC3339), expectDueTime)
+	assert.Equal(t, strconv.Itoa(expectN), r.Name)
+	assert.Equal(t, expectDueTime, r.ScheduledTime().Format(time.RFC3339))
 }

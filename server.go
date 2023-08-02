@@ -8,8 +8,8 @@ import (
 	"reminders-demo/pkg/reminders"
 	"time"
 
-	"github.com/go-chi/chi"
-	"github.com/go-chi/chi/middleware"
+	chi "github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 )
 
 // Used in the demo app to have a way to pass input to the server

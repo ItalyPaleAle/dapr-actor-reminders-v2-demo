@@ -23,7 +23,8 @@ func (r Reminder) Key() string {
 	return r.ActorType + "/" + r.ActorID + "/" + r.Name
 }
 
-// NextTick returns the time the reminder should tick again next.
-func (r Reminder) NextTick() time.Time {
+// ScheduledTime returns the time the reminder is scheduled to be executed at.
+// This is implemented to comply with the queueable interface.
+func (r Reminder) ScheduledTime() time.Time {
 	return r.ExecutionTime
 }

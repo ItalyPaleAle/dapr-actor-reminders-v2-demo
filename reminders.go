@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/benbjohnson/clock"
+	kclock "k8s.io/utils/clock"
 
 	"reminders-demo/pkg/reminders"
 )
@@ -27,14 +27,14 @@ const (
 
 type Reminders struct {
 	db        *sql.DB
-	processor *reminders.Processor
+	processor *reminders.Processor[*reminders.Reminder]
 }
 
 func NewReminders(db *sql.DB) *Reminders {
 	r := &Reminders{
 		db: db,
 	}
-	r.processor = reminders.NewProcessor(r.executeReminder, clock.New())
+	r.processor = reminders.NewProcessor[*reminders.Reminder](r.executeReminder, kclock.RealClock{})
 	return r
 }
 

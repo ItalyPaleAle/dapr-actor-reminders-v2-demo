@@ -2,36 +2,43 @@ package reminders
 
 import (
 	"container/heap"
+	"time"
 )
 
-// Queue implements a queue for Reminder objects.
-// It acts as a "priority queue", in which reminders are added in order of when they're scheduled.
-// Internally, it uses a heap (from container/heap) that allows Insert and Pop operations to be completed in O(log N) time (where N is the queue's length).
-// Note: methods in this struct are not safe for concurrent use. Callers should use locks to ensure consistency.
-type Queue struct {
-	heap  *queueHeap
-	items map[string]*queueItem
+type queueable interface {
+	comparable
+	Key() string
+	ScheduledTime() time.Time
 }
 
-// NewQueue creates a new Reminder queue.
-func NewQueue() Queue {
-	return Queue{
-		heap:  &queueHeap{},
-		items: make(map[string]*queueItem),
+// Queue implements a queue for Reminder and actor objects.
+// It acts as a "priority queue", in which items are added in order of when they're scheduled.
+// Internally, it uses a heap (from container/heap) that allows Insert and Pop operations to be completed in O(log N) time (where N is the queue's length).
+// Note: methods in this struct are not safe for concurrent use. Callers should use locks to ensure consistency.
+type Queue[T queueable] struct {
+	heap  *queueHeap[T]
+	items map[string]*queueItem[T]
+}
+
+// NewQueue creates a new queue.
+func NewQueue[T queueable]() *Queue[T] {
+	return &Queue[T]{
+		heap:  &queueHeap[T]{},
+		items: make(map[string]*queueItem[T]),
 	}
 }
 
-// Len returns the number of reminders in the queue.
-func (p *Queue) Len() int {
+// Len returns the number of items in the queue.
+func (p *Queue[T]) Len() int {
 	return p.heap.Len()
 }
 
-// Insert inserts a new reminder into the queue.
-// If replace is true, existing reminders are replaced
-func (p *Queue) Insert(r *Reminder, replace bool) {
+// Insert inserts a new item into the queue.
+// If replace is true, existing items are replaced
+func (p *Queue[T]) Insert(r T, replace bool) {
 	key := r.Key()
 
-	// Check if the reminder already exists
+	// Check if the item already exists
 	item, ok := p.items[key]
 	if ok {
 		if replace {
@@ -41,39 +48,44 @@ func (p *Queue) Insert(r *Reminder, replace bool) {
 		return
 	}
 
-	item = &queueItem{
+	item = &queueItem[T]{
 		value: r,
 	}
 	heap.Push(p.heap, item)
 	p.items[key] = item
 }
 
-// Pop removes the next reminder in the queue and returns it, or nil if the queue is empty.
-func (p *Queue) Pop() *Reminder {
+// Pop removes the next item in the queue and returns it.
+// The returned boolean value will be "true" if an item was found.
+func (p *Queue[T]) Pop() (T, bool) {
 	if p.Len() == 0 {
-		return nil
+		var zero T
+		return zero, false
 	}
 
-	item, ok := heap.Pop(p.heap).(*queueItem)
+	item, ok := heap.Pop(p.heap).(*queueItem[T])
 	if !ok || item == nil {
-		return nil
+		var zero T
+		return zero, false
 	}
 
 	delete(p.items, item.value.Key())
-	return item.value
+	return item.value, true
 }
 
-// Peek returns the next reminder in the queue, without removing it, or nil if the queue is empty.
-func (p *Queue) Peek() *Reminder {
+// Peek returns the next item in the queue, without removing it.
+// The returned boolean value will be "true" if an item was found.
+func (p *Queue[T]) Peek() (T, bool) {
 	if p.Len() == 0 {
-		return nil
+		var zero T
+		return zero, false
 	}
 
-	return (*p.heap)[0].value
+	return (*p.heap)[0].value, true
 }
 
-// Remove a reminder from the queue.
-func (p *Queue) Remove(r *Reminder) {
+// Remove an item from the queue.
+func (p *Queue[T]) Remove(r T) {
 	key := r.Key()
 
 	// If the item is not in the queue, this is a nop
@@ -86,8 +98,8 @@ func (p *Queue) Remove(r *Reminder) {
 	delete(p.items, key)
 }
 
-// Update a reminder in the queue.
-func (p *Queue) Update(r *Reminder) {
+// Update an item in the queue.
+func (p *Queue[T]) Update(r T) {
 	// If the item is not in the queue, this is a nop
 	item, ok := p.items[r.Key()]
 	if !ok {
@@ -98,37 +110,37 @@ func (p *Queue) Update(r *Reminder) {
 	heap.Fix(p.heap, item.index)
 }
 
-type queueItem struct {
-	value *Reminder
+type queueItem[T queueable] struct {
+	value T
 
 	// The index of the item in the heap. This is maintained by the heap.Interface methods.
 	index int
 }
 
-type queueHeap []*queueItem
+type queueHeap[T queueable] []*queueItem[T]
 
-func (pq queueHeap) Len() int {
+func (pq queueHeap[T]) Len() int {
 	return len(pq)
 }
 
-func (pq queueHeap) Less(i, j int) bool {
-	return pq[i].value.ExecutionTime.UnixNano() < pq[j].value.ExecutionTime.UnixNano()
+func (pq queueHeap[T]) Less(i, j int) bool {
+	return pq[i].value.ScheduledTime().Before(pq[j].value.ScheduledTime())
 }
 
-func (pq queueHeap) Swap(i, j int) {
+func (pq queueHeap[T]) Swap(i, j int) {
 	pq[i], pq[j] = pq[j], pq[i]
 	pq[i].index = i
 	pq[j].index = j
 }
 
-func (pq *queueHeap) Push(x any) {
+func (pq *queueHeap[T]) Push(x any) {
 	n := len(*pq)
-	item := x.(*queueItem)
+	item := x.(*queueItem[T])
 	item.index = n
 	*pq = append(*pq, item)
 }
 
-func (pq *queueHeap) Pop() any {
+func (pq *queueHeap[T]) Pop() any {
 	old := *pq
 	n := len(old)
 	item := old[n-1]
